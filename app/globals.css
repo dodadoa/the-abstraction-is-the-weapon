@@ -126,7 +126,7 @@ html,body{margin:0;height:100%;background:var(--ink);overflow:hidden;
   background:rgba(238,240,243,.95);
   font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
   color:#1f2430;letter-spacing:0;text-transform:none;-webkit-font-smoothing:antialiased}
-.m3.on{display:flex;align-items:center;justify-content:flex-end;padding-right:28px}
+.m3.on{display:block}
 .m3{background:transparent;pointer-events:none;transition:background .18s}
 .m3.hit{background:rgba(255,220,228,.08)}
 .m3-app{pointer-events:auto}
@@ -138,6 +138,12 @@ html,body{margin:0;height:100%;background:var(--ink);overflow:hidden;
   font-family:'Mesa043',ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
   font-size:10px;letter-spacing:.22em;color:rgba(216,255,176,.85);text-transform:uppercase;
   text-shadow:0 0 6px rgba(0,0,0,.8)}
+/* right half of the control room: two stacked quadrants, sheet above queue */
+.m3-quad{position:absolute;right:0;width:50vw;height:50vh;box-sizing:border-box;
+  display:flex;align-items:center;justify-content:center;padding:18px;pointer-events:none}
+.m3-quad.tr{top:0}
+.m3-quad.br{bottom:0}
+.m3-quad .m3-app,.m3-quad .m3-sheet{pointer-events:auto}
 .hud.mini{inset:0 auto auto 0;width:50vw;height:50vh}
 .drone.mini{inset:auto;left:0;top:50vh;width:50vw;height:50vh}
 .drone.mini .d-ret{width:150px;height:150px;margin:-75px 0 0 -75px}
@@ -149,8 +155,9 @@ html,body{margin:0;height:100%;background:var(--ink);overflow:hidden;
 .m3-row .bar{height:3px;background:#eef1f6;border-radius:2px;margin-top:7px;opacity:0;width:200px}
 .m3-row .bar i{display:block;height:100%;width:0;background:#4a7dff;border-radius:2px}
 .m3-row.queued button{background:#e8edf8;color:#4a7dff}
-.m3-app{width:540px;max-height:80vh;background:#fff;border-radius:14px;
-  box-shadow:0 12px 40px rgba(30,40,60,.18);padding:22px 26px;display:flex;flex-direction:column}
+.m3-app{width:min(480px,100%);max-height:100%;background:#fff;border-radius:14px;
+  box-shadow:0 12px 40px rgba(30,40,60,.18);padding:22px 26px;display:flex;flex-direction:column;
+  overflow:hidden}
 .m3-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
 .m3-title{font-size:17px;font-weight:600}
 .m3-sub{font-size:12px;color:#8a93a5;margin-top:2px}
@@ -169,6 +176,42 @@ html,body{margin:0;height:100%;background:var(--ink);overflow:hidden;
   opacity:0;transition:opacity .25s;pointer-events:none}
 .m3-toast.show{opacity:1}
 .seq .cell.onn.play{fill:#fff;filter:drop-shadow(0 0 3px rgba(255,255,255,.9))}
+
+/* mode 3, 4th quadrant: the same drum pattern, skinned as a spreadsheet */
+.m3-sheet{width:100%;height:100%;max-width:560px;background:#fff;border-radius:8px;
+  box-shadow:0 12px 40px rgba(30,40,60,.18);display:flex;flex-direction:column;
+  overflow:hidden;font-family:Calibri,'Segoe UI',Arial,sans-serif;color:#1a1a1a;font-size:12px}
+.m3-sheet-bar{background:#107c41;color:#fff;padding:7px 12px;font-size:12px;font-weight:600;
+  display:flex;align-items:center;justify-content:space-between;flex:none}
+.m3-sheet-bar .tab{background:rgba(255,255,255,.16);padding:2px 10px;border-radius:3px;font-weight:500}
+.m3-sheet-fx{display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid #d0d7de;
+  background:#f8f9fa;flex:none}
+.m3-sheet-ref{border:1px solid #cfd4da;background:#fff;padding:2px 8px;border-radius:2px;
+  font-size:11px;min-width:30px;text-align:center;color:#333;font-weight:600}
+.m3-sheet-fxicon{font-style:italic;color:#666;font-size:12px}
+.m3-sheet-formula{flex:1;font-size:11px;color:#333;font-family:Consolas,'SFMono-Regular',monospace;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.m3-sheet-grid{flex:1;overflow:auto;background:#fff}
+.m3-sheet table{border-collapse:collapse;width:100%;table-layout:fixed}
+.m3-sheet th,.m3-sheet td{border:1px solid #e1e4e8;text-align:center;padding:0;
+  height:25px;font-size:11px;white-space:nowrap}
+.m3-sheet th{background:#f3f2f1;color:#444;font-weight:600;position:sticky;top:0;z-index:2;
+  transition:background .1s,color .1s}
+.m3-sheet th.play{background:#1a73e8;color:#fff}
+.m3-sheet td.rownum{background:#f3f2f1;color:#444;font-weight:600;width:22px;
+  position:sticky;left:0;z-index:1}
+.m3-sheet th.corner{position:sticky;left:0;z-index:3;width:22px}
+.m3-sheet th.corner:nth-child(2){left:22px;width:56px;text-align:left;padding-left:6px}
+.m3-sheet td.track{background:#f8f9fa;font-weight:600;text-align:left;padding-left:6px;
+  color:#1a1a1a;width:56px;position:sticky;left:22px;z-index:1}
+.m3-sheet td.cell{cursor:pointer;width:24px;transition:background .08s;color:transparent}
+.m3-sheet td.cell:hover{background:#eef6ff}
+.m3-sheet td.cell.onn{background:#c6efce;color:#006100;font-weight:700}
+.m3-sheet td.cell.onn::after{content:'\2713'}
+.m3-sheet td.cell.play{outline:2px solid #1a73e8;outline-offset:-2px;background:#d7e8fd}
+.m3-sheet td.cell.onn.play{background:#a9e2b4}
+.m3-sheet tr.mel td.cell{border-style:dashed}
+.m3-sheet tr.mel td.track{font-style:italic;color:#5a6270}
 
 .gate{position:fixed;inset:0;z-index:9;display:flex;align-items:center;justify-content:center;
   background:radial-gradient(120% 90% at 50% 40%,#12160c 0%,#050604 70%);cursor:pointer}

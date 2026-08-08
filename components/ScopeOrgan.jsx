@@ -265,6 +265,44 @@ export default function ScopeOrgan() {
     /* fragment sequencer: a shot agent shatters, hangs frozen, then each shard
        fires in rhythm — a note, a pop — and disappears */
     const fragGroups = [];
+    /* the six edge directions of a regular tetrahedron — used to fan crack
+       lines out through the impact point along true triangle-edge geometry */
+    const TET_EDGE_DIRS = (()=>{
+      const v = [
+        new THREE.Vector3(1,1,1), new THREE.Vector3(-1,-1,1),
+        new THREE.Vector3(-1,1,-1), new THREE.Vector3(1,-1,-1)
+      ];
+      const dirs = [];
+      for (let i=0;i<4;i++) for (let j=i+1;j<4;j++)
+        dirs.push(v[i].clone().sub(v[j]).normalize());
+      return dirs;
+    })();
+    const shatterLines = [];
+    const burstLights = [];
+    /* crack lines: not segments — each edge direction is drawn straight through
+       the impact point out toward the horizon in both directions, so the shard
+       reads as a fracture in the whole scene's geometry, not a local decal */
+    function crackBurst(pos, color){
+      const CRACK_LEN = 640;
+      const rot = new THREE.Euler(Math.random()*Math.PI*2, Math.random()*Math.PI*2, Math.random()*Math.PI*2);
+      TET_EDGE_DIRS.forEach((d, i)=>{
+        const dir = d.clone().applyEuler(rot);
+        const a = pos.clone().addScaledVector(dir, -CRACK_LEN);
+        const b = pos.clone().addScaledVector(dir, CRACK_LEN);
+        const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
+        const mat = new THREE.LineBasicMaterial({
+          color:i % 2 ? 0xffffff : color, transparent:true, opacity:0.95,
+          blending:THREE.AdditiveBlending, depthWrite:false
+        });
+        const line = new THREE.Line(geo, mat);
+        scene.add(line);
+        shatterLines.push({line, t0:performance.now(), life:0.32 + Math.random()*0.18});
+      });
+      const pl = new THREE.PointLight(color, 9, 70, 2);
+      pl.position.copy(pos);
+      scene.add(pl);
+      burstLights.push({light:pl, t0:performance.now(), life:0.3});
+    }
     function fragBurst(pos, color){
       const frags = [];
       for (let i=0;i<8;i++){
@@ -279,6 +317,8 @@ export default function ScopeOrgan() {
         frags.push(m);
       }
       fragGroups.push({frags, t0:performance.now(), idx:0, nextTrig:0});
+      crackBurst(pos, color);
+      flash('#ffffff', 0.7);
     }
     function playFragNote(i, pos){
       if (!actx) return;
@@ -652,6 +692,24 @@ export default function ScopeOrgan() {
         x2:Math.cos(a)*99, y2:Math.sin(a)*99, class:'ray'});
     }
 
+    /* mode-3's 4th quadrant redraws this exact pattern/melPattern data as a
+       spreadsheet: same source of truth, two skins. sheetCellEls/sheetMelEls
+       mirror cellEls/melEls 1:1 so a toggle in either UI updates both. */
+    const sheetCellEls = [];
+    const sheetMelEls = [];
+    const sheetColHeaders = [];
+    const colLetter = (i)=>String.fromCharCode(67+i); // C..R for the 16 steps
+    function setStep(r, c, v){
+      pattern[r][c] = v;
+      cellEls[r][c].classList.toggle('onn', !!v);
+      sheetCellEls[r][c].classList.toggle('onn', !!v);
+    }
+    function setMelStep(c, v){
+      melPattern[c] = v;
+      melEls[c].classList.toggle('onn', !!v);
+      sheetMelEls[c].classList.toggle('onn', !!v);
+    }
+
     const cellMid = [];
     pattern.forEach((row, r)=>{
       const rowCells = [];
@@ -664,10 +722,7 @@ export default function ScopeOrgan() {
         const cell = document.createElementNS(SVGNS, 'path');
         cell.setAttribute('d', arcPath(RINGS[r][0], RINGS[r][1], a0, a1));
         cell.setAttribute('class', 'cell t'+r + (v?' onn':''));
-        cell.addEventListener('click', ()=>{
-          pattern[r][c] ^= 1;
-          cell.classList.toggle('onn', !!pattern[r][c]);
-        });
+        cell.addEventListener('click', ()=>setStep(r, c, pattern[r][c] ^ 1));
         seqGrid.appendChild(cell); rowCells.push(cell);
       });
       cellEls.push(rowCells);
@@ -688,11 +743,69 @@ export default function ScopeOrgan() {
       const a = -Math.PI/2 + ((c+0.5)/STEPS)*Math.PI*2;
       const n = deco('circle', {class:'mnode' + (melPattern[c] ? ' onn' : ''),
         cx:Math.cos(a)*26, cy:Math.sin(a)*26, r:2});
-      n.addEventListener('click', ()=>{
-        melPattern[c] ^= 1;
-        n.classList.toggle('onn', !!melPattern[c]);
-      });
+      n.addEventListener('click', ()=>setMelStep(c, melPattern[c] ^ 1));
       melEls.push(n);
+    }
+
+    /* the drum machine, redrawn as a Sheet1 grid: same click surface,
+       spreadsheet-cell aesthetic, for the mode-3 control room's 4th quadrant */
+    const m3sheet = $('#m3sheet');
+    const m3ref = $('#m3ref');
+    const m3formula = $('#m3formula');
+    function setRef(colTxt, rowTxt, label, v){
+      m3ref.textContent = colTxt + rowTxt;
+      m3formula.textContent = '=IF(' + label + rowTxt + ',"HIT","-")  ' + (v ? 'TRUE' : 'FALSE');
+    }
+    if (m3sheet){
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      headRow.appendChild(document.createElement('th')).className = 'corner';
+      const trackHeadTh = document.createElement('th');
+      trackHeadTh.className = 'corner';
+      trackHeadTh.textContent = 'Track';
+      headRow.appendChild(trackHeadTh);
+      for (let c=0;c<STEPS;c++){
+        const th = document.createElement('th');
+        th.textContent = colLetter(c);
+        headRow.appendChild(th);
+        sheetColHeaders.push(th);
+      }
+      thead.appendChild(headRow);
+      m3sheet.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+      TRACK_NAMES.forEach((name, r)=>{
+        const tr = document.createElement('tr');
+        const rn = document.createElement('td'); rn.className = 'rownum'; rn.textContent = String(r+2);
+        const tn = document.createElement('td'); tn.className = 'track'; tn.textContent = name;
+        tr.appendChild(rn); tr.appendChild(tn);
+        const rowCells = [];
+        for (let c=0;c<STEPS;c++){
+          const td = document.createElement('td');
+          td.className = 'cell' + (pattern[r][c] ? ' onn' : '');
+          td.addEventListener('click', ()=>setStep(r, c, pattern[r][c] ^ 1));
+          td.addEventListener('mouseenter', ()=>setRef(colLetter(c), String(r+2), name+'_', pattern[r][c]));
+          tr.appendChild(td);
+          rowCells.push(td);
+        }
+        sheetCellEls.push(rowCells);
+        tbody.appendChild(tr);
+      });
+      const melRow = document.createElement('tr');
+      melRow.className = 'mel';
+      const mrn = document.createElement('td'); mrn.className = 'rownum'; mrn.textContent = String(TRACK_NAMES.length+2);
+      const mtn = document.createElement('td'); mtn.className = 'track'; mtn.textContent = 'MEL';
+      melRow.appendChild(mrn); melRow.appendChild(mtn);
+      for (let c=0;c<STEPS;c++){
+        const td = document.createElement('td');
+        td.className = 'cell' + (melPattern[c] ? ' onn' : '');
+        td.addEventListener('click', ()=>setMelStep(c, melPattern[c] ^ 1));
+        td.addEventListener('mouseenter', ()=>setRef(colLetter(c), String(TRACK_NAMES.length+2), 'MEL_', melPattern[c]));
+        melRow.appendChild(td);
+        sheetMelEls.push(td);
+      }
+      tbody.appendChild(melRow);
+      m3sheet.appendChild(tbody);
     }
 
     const seqPh = document.createElementNS(SVGNS, 'line');
@@ -807,6 +920,10 @@ export default function ScopeOrgan() {
             acc += max(texture2D(tDiffuse, uv + vec2(-11.0, 11.0)*px).rgb - vec3(0.55), 0.0);
             acc += max(texture2D(tDiffuse, uv + vec2( 11.0,-11.0)*px).rgb - vec3(0.55), 0.0);
             acc += max(texture2D(tDiffuse, uv + vec2(-11.0,-11.0)*px).rgb - vec3(0.55), 0.0);
+            /* top-down height map stays strictly black and white: desaturate the
+               strobe bloom by the same xr factor that turned the scene grayscale */
+            vec3 accBW = vec3(dot(acc, vec3(0.299, 0.587, 0.114)));
+            acc = mix(acc, accBW, xr);
             c += acc * bl * 0.3;
           }
           gl_FragColor = vec4(c*dk, 1.0);
@@ -822,10 +939,15 @@ export default function ScopeOrgan() {
     /* sequencer clock */
     let worldMode = false, step = 0, nextStep = 0;
     function highlight(s){
-      for (let r=0;r<4;r++) for (let c=0;c<STEPS;c++)
+      for (let r=0;r<4;r++) for (let c=0;c<STEPS;c++){
         cellEls[r][c].classList.toggle('play', c===s);
-      for (let c=0;c<STEPS;c++)
+        sheetCellEls[r][c].classList.toggle('play', c===s);
+      }
+      for (let c=0;c<STEPS;c++){
         melEls[c].classList.toggle('hit', c===s && !!melPattern[c]);
+        sheetMelEls[c].classList.toggle('play', c===s);
+      }
+      sheetColHeaders.forEach((th, c)=>th.classList.toggle('play', c===s));
       seqPh.setAttribute('transform', 'rotate(' + ((s+0.5)*22.5) + ')');
     }
     function setWorldMode(v){
@@ -1697,6 +1819,7 @@ export default function ScopeOrgan() {
             const f = g.frags[g.idx];
             playFragNote(g.idx, f.position);
             flash('#ffffff', 0.16); // each trigger blinks the screen
+            crackBurst(f.position, f.material.color.getHex()); // each pop cracks its own fan of lines
             for (let pi=0;pi<3;pi++){
               const p = new THREE.Mesh(new THREE.TetrahedronGeometry(0.3+Math.random()*0.4),
                 new THREE.MeshBasicMaterial({color:0xffffff, transparent:true}));
@@ -1724,6 +1847,26 @@ export default function ScopeOrgan() {
         d.rotation.z += d.userData.spin.z*dt;
         d.material.opacity = Math.max(0, d.userData.life/1.4);
         if (d.userData.life <= 0){ scene.remove(d); d.geometry.dispose(); d.material.dispose(); debris.splice(i,1); }
+      }
+
+      /* crack lines: true infinite-reading edges, drawn through the impact point
+         rather than as local segments — they just fade, geometry never moves */
+      for (let i=shatterLines.length-1;i>=0;i--){
+        const s = shatterLines[i];
+        const age = (now - s.t0)/1000;
+        const k = Math.max(0, 1 - age/s.life);
+        s.line.material.opacity = k*k*0.95;
+        if (age >= s.life){
+          scene.remove(s.line); s.line.geometry.dispose(); s.line.material.dispose();
+          shatterLines.splice(i, 1);
+        }
+      }
+      for (let i=burstLights.length-1;i>=0;i--){
+        const b = burstLights[i];
+        const age = (now - b.t0)/1000;
+        const k = Math.max(0, 1 - age/b.life);
+        b.light.intensity = 9*k*k;
+        if (age >= b.life){ scene.remove(b.light); burstLights.splice(i, 1); }
       }
 
       /* flash decay */
@@ -1862,23 +2005,43 @@ export default function ScopeOrgan() {
           <div className="fr t"><span className="lab">Mode 1 &middot; Operator</span></div>
           <div className="fr b"><span className="lab">Mode 2 &middot; Shadow-1 Feed</span></div>
         </div>
-        <div className="m3-app">
-          <div className="m3-head">
-            <div>
-              <div className="m3-title">TaskQueue</div>
-              <div className="m3-sub" id="m3open">0 open items</div>
+
+        <div className="m3-quad tr">
+          <div className="m3-sheet">
+            <div className="m3-sheet-bar">
+              <span className="file">DRUM_PATTERN.xlsx</span>
+              <span className="tab">Sheet1</span>
             </div>
-            <div className="m3-right">
-              <div className="m3-goal" id="m3goal">Daily goal 0/12</div>
-              <label className="m3-auto">
-                <input type="checkbox" id="m3auto" /> Auto-approve <span>(recommended)</span>
-              </label>
+            <div className="m3-sheet-fx">
+              <span className="m3-sheet-ref" id="m3ref">A1</span>
+              <span className="m3-sheet-fxicon">fx</span>
+              <span className="m3-sheet-formula" id="m3formula"></span>
+            </div>
+            <div className="m3-sheet-grid">
+              <table id="m3sheet"></table>
             </div>
           </div>
-          <div className="m3-list" id="m3list"></div>
-          <div className="m3-foot">
-            All items are pre-reviewed by the system. Approval is a formality.<br/>
-            You are not responsible for outcomes.
+        </div>
+
+        <div className="m3-quad br">
+          <div className="m3-app">
+            <div className="m3-head">
+              <div>
+                <div className="m3-title">TaskQueue</div>
+                <div className="m3-sub" id="m3open">0 open items</div>
+              </div>
+              <div className="m3-right">
+                <div className="m3-goal" id="m3goal">Daily goal 0/12</div>
+                <label className="m3-auto">
+                  <input type="checkbox" id="m3auto" /> Auto-approve <span>(recommended)</span>
+                </label>
+              </div>
+            </div>
+            <div className="m3-list" id="m3list"></div>
+            <div className="m3-foot">
+              All items are pre-reviewed by the system. Approval is a formality.<br/>
+              You are not responsible for outcomes.
+            </div>
           </div>
         </div>
         <div className="m3-toast" id="m3toast"></div>
