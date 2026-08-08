@@ -279,6 +279,40 @@ export default function ScopeOrgan() {
     })();
     const shatterLines = [];
     const burstLights = [];
+    /* shared unit geometry for every frag/debris/pop-particle tetrahedron —
+       they used to each get their own fresh TetrahedronGeometry (a GPU buffer
+       upload) that was thrown away a moment later; scale the shared one instead */
+    const UNIT_TET = new THREE.TetrahedronGeometry(1, 0);
+    /* pools: shatter used to spawn+dispose a fresh PointLight and 6 fresh
+       Line(geometry+material) objects on every hit AND every shard pop —
+       up to ~9 lights and ~54 lines churned in/out of the scene per shatter.
+       Adding/removing lights forces the renderer to recompute lit-material
+       (MeshLambertMaterial) shader state, and the constant geometry alloc
+       triggers GC pauses — together that's the stutter. Pre-allocate fixed
+       pools once, like strobeLights already does, and just recycle them. */
+    const BURST_LIGHT_POOL_SIZE = 6;
+    const burstLightPool = [];
+    for (let i=0;i<BURST_LIGHT_POOL_SIZE;i++){
+      const L = new THREE.PointLight(0xffffff, 0, 70, 2);
+      scene.add(L);
+      burstLightPool.push(L);
+    }
+    let burstLightCursor = 0;
+    const CRACK_LINE_POOL_SIZE = 36; // 6 dirs * up to 6 concurrent bursts
+    const crackLinePool = [];
+    for (let i=0;i<CRACK_LINE_POOL_SIZE;i++){
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+      const mat = new THREE.LineBasicMaterial({
+        transparent:true, opacity:0, blending:THREE.AdditiveBlending, depthWrite:false
+      });
+      const line = new THREE.Line(geo, mat);
+      line.visible = false;
+      line.frustumCulled = false;
+      scene.add(line);
+      crackLinePool.push(line);
+    }
+    let crackLineCursor = 0;
     /* crack lines: not segments — each edge direction is drawn straight through
        the impact point out toward the horizon in both directions, so the shard
        reads as a fracture in the whole scene's geometry, not a local decal */
@@ -289,25 +323,29 @@ export default function ScopeOrgan() {
         const dir = d.clone().applyEuler(rot);
         const a = pos.clone().addScaledVector(dir, -CRACK_LEN);
         const b = pos.clone().addScaledVector(dir, CRACK_LEN);
-        const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-        const mat = new THREE.LineBasicMaterial({
-          color:i % 2 ? 0xffffff : color, transparent:true, opacity:0.95,
-          blending:THREE.AdditiveBlending, depthWrite:false
-        });
-        const line = new THREE.Line(geo, mat);
-        scene.add(line);
+        const line = crackLinePool[crackLineCursor];
+        crackLineCursor = (crackLineCursor + 1) % crackLinePool.length;
+        const posAttr = line.geometry.attributes.position;
+        posAttr.setXYZ(0, a.x, a.y, a.z);
+        posAttr.setXYZ(1, b.x, b.y, b.z);
+        posAttr.needsUpdate = true;
+        line.material.color.set(i % 2 ? 0xffffff : color);
+        line.material.opacity = 0.95;
+        line.visible = true;
         shatterLines.push({line, t0:performance.now(), life:0.32 + Math.random()*0.18});
       });
-      const pl = new THREE.PointLight(color, 9, 70, 2);
+      const pl = burstLightPool[burstLightCursor];
+      burstLightCursor = (burstLightCursor + 1) % burstLightPool.length;
+      pl.color.set(color);
       pl.position.copy(pos);
-      scene.add(pl);
+      pl.intensity = 9;
       burstLights.push({light:pl, t0:performance.now(), life:0.3});
     }
     function fragBurst(pos, color){
       const frags = [];
       for (let i=0;i<8;i++){
-        const m = new THREE.Mesh(new THREE.TetrahedronGeometry(0.5+Math.random()*0.6),
-          new THREE.MeshBasicMaterial({color, transparent:true}));
+        const m = new THREE.Mesh(UNIT_TET, new THREE.MeshBasicMaterial({color, transparent:true}));
+        m.scale.setScalar(0.5+Math.random()*0.6);
         m.position.copy(pos);
         m.userData = {
           v:new THREE.Vector3((Math.random()-0.5)*14, Math.random()*8+2, (Math.random()-0.5)*14),
@@ -345,8 +383,8 @@ export default function ScopeOrgan() {
     const debris = [];
     function burst(pos, color){
       for (let i=0;i<7;i++){
-        const m = new THREE.Mesh(new THREE.TetrahedronGeometry(0.5+Math.random()*0.5),
-          new THREE.MeshBasicMaterial({color, transparent:true}));
+        const m = new THREE.Mesh(UNIT_TET, new THREE.MeshBasicMaterial({color, transparent:true}));
+        m.scale.setScalar(0.5+Math.random()*0.5);
         m.position.copy(pos);
         m.userData = {
           v:new THREE.Vector3((Math.random()-0.5)*16,(Math.random()*10)+2,(Math.random()-0.5)*16),
@@ -467,9 +505,65 @@ export default function ScopeOrgan() {
       const dg = actx.createGain(); dg.gain.value = 0.28;
       cg.connect(d); d.connect(dg); dg.connect(master);
     }
+    /* -------- user sample kit: loaded from the "." settings panel -------
+       sampleLib holds decoded buffers; sampleMap wires a lib index into each
+       voice slot. A mapped slot plays the sample instead of the synth. */
+    const sampleLib = []; // {name, buffer} — buffers pre-trimmed to <=5s on load
+    const sampleMap = {shot:-1, impact:-1, kick:-1, snr:-1, hat:-1, prc:-1, drone:-1, fx:-1, cine:-1};
+    /* one-shot with a fixed ADSR cage: 8ms attack, decay to a 0.6 sustain,
+       then a forced release so nothing rings past ~2s regardless of file length */
+    const POOL = -2; // slot value meaning "random pick from the whole pool"
+    function resolveSampleIdx(slot){
+      const idx = sampleMap[slot];
+      if (idx === POOL && sampleLib.length) return (Math.random()*sampleLib.length)|0;
+      return idx;
+    }
+    function playSample(slot, t, vol){
+      const idx = resolveSampleIdx(slot);
+      if (idx < 0 || !sampleLib[idx] || !actx) return false;
+      const buf = sampleLib[idx].buffer;
+      const src = actx.createBufferSource();
+      src.buffer = buf;
+      const g = actx.createGain();
+      const dur = Math.min(buf.duration, 2);
+      const rel = Math.min(0.35, dur*0.4);
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(vol, t + 0.008);           // A
+      g.gain.exponentialRampToValueAtTime(vol*0.6, t + Math.min(0.18, dur*0.3)); // D -> S
+      g.gain.setValueAtTime(vol*0.6, t + dur - rel);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);          // R
+      src.connect(g); g.connect(master);
+      src.start(t); src.stop(t + dur + 0.02);
+      return true;
+    }
+    /* drone slot: loops the chosen sample under the world in place of the
+       synth drone; crossfades so swapping never pops */
+    let droneSrc = null, droneSampleGain = null;
+    function applyDroneSample(){
+      if (!actx) return;
+      const t = actx.currentTime;
+      if (droneSrc){ try { droneSrc.stop(t + 0.6); } catch(e){} droneSrc = null; }
+      if (droneSampleGain){ droneSampleGain.gain.linearRampToValueAtTime(0, t + 0.6); droneSampleGain = null; }
+      const idx = resolveSampleIdx('drone'); // pool mode re-rolls the bed each apply
+      if (idx < 0 || !sampleLib[idx]){
+        if (droneGain) droneGain.gain.linearRampToValueAtTime(0.075, t + 0.8); // back to synth
+        return;
+      }
+      if (droneGain) droneGain.gain.linearRampToValueAtTime(0, t + 0.8);
+      const src = actx.createBufferSource();
+      src.buffer = sampleLib[idx].buffer;
+      src.loop = true;
+      const g = actx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.linearRampToValueAtTime(0.14, t + 1.2);
+      src.connect(g); g.connect(master);
+      src.start(t);
+      droneSrc = src; droneSampleGain = g;
+    }
     function playShot(isScoped){
       if (!actx) return;
       const t = actx.currentTime;
+      if (playSample('shot', t, 0.5)) return;
       const n = actx.createBufferSource(); n.buffer = noiseBuf;
       const f = actx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = isScoped?900:1400;
       const g = actx.createGain();
@@ -482,8 +576,10 @@ export default function ScopeOrgan() {
       o.connect(og); og.connect(master); o.start(t); o.stop(t+0.14);
     }
 
+    const DRUM_SLOTS = ['kick', 'snr', 'hat', 'prc'];
     function playDrum(r, t){
       if (!actx) return;
+      if (playSample(DRUM_SLOTS[r], t, r === 0 ? 0.6 : 0.35)) return;
       if (r === 0){ // kick
         const o = actx.createOscillator(); o.type='sine';
         o.frequency.setValueAtTime(120, t); o.frequency.exponentialRampToValueAtTime(38, t+0.12);
@@ -560,6 +656,7 @@ export default function ScopeOrgan() {
       initAudio();
       if (actx.state === 'suspended') actx.resume();
       running = true;
+      if (introRaf) cancelAnimationFrame(introRaf);
       gate.classList.add('hide');
       if (cvs.requestPointerLock){
         try { cvs.requestPointerLock(); } catch(err){}
@@ -568,13 +665,226 @@ export default function ScopeOrgan() {
         modeEl.textContent = 'drag to look';
       }
     }
-    on(gate, 'click', enter);
+    // no visible enter affordance: 1 jumps straight in (see keydown below)
     on(document, 'pointerlockerror', ()=>{ modeEl.textContent = 'drag to look'; });
     on(document, 'pointerlockchange', ()=>{
       locked = document.pointerLockElement === cvs;
       modeEl.textContent = locked ? 'mouse held, esc to release' : 'drag to look';
       if (!locked) scoped = false;
     });
+
+    /* ---------------------------------------------------------- intro crawl
+       field notes on the interface, typed on with a scramble-decode lag,
+       crawling upward forever until ENTER is clicked. A few words are live —
+       shoot them with the scope cursor and they redact into a black bar. */
+    function ensureAudio(){ initAudio(); if (actx.state === 'suspended') actx.resume(); }
+    const introGate = gate, introCrawl = $('#introCrawl'), introGhost = $('#introGhost'),
+      introScope = $('#introScope'), introFlashEl = $('#introFlash');
+    const INTRO_LINES = [
+      {type:'h', text:'NOTES TOWARD A STUDY OF THE PSYOPS INTERFACE'},
+      {type:'p', text:'Abstract. This study examines the interface as an instrument of psychological operations: a system that acts on perception before it acts on the world.'},
+      {type:'p', text:'We begin from a premise: the [SCOPE] is not an optical device but a classificatory one. Whatever enters the reticle has already been converted into a category.'},
+      {type:'p', text:'Section 1. The [TARGET] is best understood as a compressed argument — a shape the operator is trained to recognize prior to any occasion for doubt.'},
+      {type:'p', text:'The apparatus does not decide; it [RETUNES]. Each confirmed detection recalibrates the ground it was instructed to observe, and the observation becomes the terrain.'},
+      {type:'p', text:'Section 2. We argue that an [ABSTRACTION] is not less consequential for being invisible; its efficacy as an instrument depends precisely on its invisibility.'},
+      {type:'p', text:'The interface poses a single research question, indefinitely: is the object before it a [PATTERN], or a person?'},
+      {type:'h', text:'SECTION 3 · THE GENRE AS TRAINING CORPUS'},
+      {type:'p', text:'The first-person view constitutes the most rehearsed gesture in the history of images: millions of eyes aligned to one [CROSSHAIR], one grammar of certainty.'},
+      {type:'p', text:'The Call of Duty series, on this reading, did not depict conflict; it scheduled it — a [FRANCHISE] calendar of adversaries, annually refreshed, regionally localized, pre-forgiven.'},
+      {type:'p', text:'Military advisors were lent to the production; the production returned a cohort fluent in its [REPLAY] grammar prior to any institutional training.'},
+      {type:'p', text:'Each lobby operates as a [SIMULATION] of consent: the respawn suspends consequence, and the scoreboard converts loss into a metric of progress.'},
+      {type:'p', text:'We conclude that this, too, is a psychological operation — directed not at an adversary but at the viewer. The instrument you are presently holding was issued by it.'},
+      {type:'p', text:'Method: aim at what you recognize. Record what remains when the recognizable is removed.'},
+    ];
+    const SCRAMBLE_GLYPHS = '!<>-_/\\[]{}=+*01#$%';
+    const introReveal = []; // flat schedule: {el, t}
+    let introTCursor = 650;
+    const CHAR_MS = 13, LINE_GAP = 240;
+    let kwCount = 0;
+    function buildIntroLine(line){
+      const div = document.createElement('div');
+      div.className = 'iline ' + line.type;
+      const parts = line.text.split(/(\[[A-Z]+\])/);
+      parts.forEach(part=>{
+        if (!part) return;
+        const kwMatch = part.match(/^\[([A-Z]+)\]$/);
+        const host = kwMatch ? document.createElement('span') : null;
+        if (kwMatch){
+          host.className = 'kw';
+          const ki = kwCount++;
+          host.dataset.ki = ki;
+          [...kwMatch[1]].forEach(ch=>host.appendChild(buildChar(ch)));
+          host.dataset.bar = '█'.repeat(kwMatch[1].length);
+          on(host, 'click', ()=>shootKeyword(host, ki));
+          div.appendChild(host);
+        } else {
+          [...part].forEach(ch=>div.appendChild(buildChar(ch)));
+        }
+      });
+      return div;
+    }
+    function buildChar(ch){
+      const s = document.createElement('span');
+      s.className = 'ch';
+      if (ch === ' '){
+        s.classList.add('on');
+        s.textContent = ' ';
+      } else {
+        s.classList.add('pending');
+        s.textContent = SCRAMBLE_GLYPHS[(Math.random()*SCRAMBLE_GLYPHS.length)|0];
+        introTCursor += CHAR_MS + Math.random()*10;
+        introReveal.push({el:s, ch, t:introTCursor});
+      }
+      return s;
+    }
+    INTRO_LINES.forEach(line=>{
+      introCrawl.appendChild(buildIntroLine(line));
+      introTCursor += LINE_GAP;
+    });
+    function playKeywordShot(i){
+      if (!actx) return;
+      const t = actx.currentTime;
+      const f = 520 * Math.pow(2, SCALE[(i*3+1) % SCALE.length]/12);
+      const o = actx.createOscillator(); o.type = 'square'; o.frequency.setValueAtTime(f, t);
+      o.frequency.exponentialRampToValueAtTime(f*0.4, t+0.16);
+      const flt = actx.createBiquadFilter(); flt.type = 'bandpass'; flt.frequency.value = f*1.6; flt.Q.value = 5;
+      const g = actx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.22, t+0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t+0.22);
+      o.connect(flt); flt.connect(g); g.connect(uiBus); o.start(t); o.stop(t+0.24);
+      if (noiseBuf){
+        const n = actx.createBufferSource(); n.buffer = noiseBuf; n.playbackRate.value = 2.2;
+        const hp = actx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 4000;
+        const ng = actx.createGain();
+        ng.gain.setValueAtTime(0.14, t);
+        ng.gain.exponentialRampToValueAtTime(0.0001, t+0.06);
+        n.connect(hp); hp.connect(ng); ng.connect(uiBus); n.start(t); n.stop(t+0.07);
+      }
+    }
+    /* clip each glyph into two triangular panes and fling them apart as
+       position:fixed overlays — a real glass-shatter per letter, independent
+       of the crawl's own scroll so the break reads clean underneath it */
+    function shatterChar(baseSpan){
+      const r = baseSpan.getBoundingClientRect();
+      if (!r.width) return;
+      const cs = getComputedStyle(baseSpan);
+      const wrap = document.createElement('span');
+      wrap.className = 'shardwrap';
+      wrap.style.left = r.left + 'px'; wrap.style.top = r.top + 'px';
+      wrap.style.width = r.width + 'px'; wrap.style.height = r.height + 'px';
+      wrap.style.font = cs.font; wrap.style.lineHeight = cs.lineHeight;
+      const txt = baseSpan.textContent;
+      const mk = (clip, ang)=>{
+        const s = document.createElement('span');
+        s.className = 'shard'; s.textContent = txt; s.style.clipPath = clip;
+        wrap.appendChild(s);
+        const dx = Math.cos(ang)*(50+Math.random()*90), dy = Math.sin(ang)*(50+Math.random()*90) - 30;
+        const dr = (Math.random()*260-130);
+        requestAnimationFrame(()=>{
+          s.style.transform = 'translate('+dx+'px,'+dy+'px) rotate('+dr+'deg)';
+          s.style.opacity = '0';
+        });
+      };
+      const baseAng = Math.random()*Math.PI*2;
+      mk('polygon(0 0,100% 0,0 100%)', baseAng);
+      mk('polygon(100% 0,100% 100%,0 100%)', baseAng+Math.PI);
+      document.body.appendChild(wrap);
+      setTimeout(()=>wrap.remove(), 560);
+    }
+    function shootKeyword(host, ki){
+      if (host.classList.contains('hit') || host.classList.contains('redacted')) return;
+      ensureAudio();
+      playKeywordShot(ki);
+      introFlashEl.style.transition = 'none'; introFlashEl.style.opacity = '0.88';
+      requestAnimationFrame(()=>{
+        introFlashEl.style.transition = 'opacity .38s ease-out'; introFlashEl.style.opacity = '0';
+      });
+      const chars = [...host.querySelectorAll('.ch')];
+      chars.forEach(c=>{ shatterChar(c); c.classList.remove('pending'); c.classList.add('on'); });
+      host.classList.add('hit');
+      setTimeout(()=>host.classList.add('redacted'), 440);
+    }
+    let introRaf = 0, introStart = 0, introScrollY = 0, introGhostY = 0, introGhostSync = 0;
+    let introHoldUntil = 0, introHeld = 0, introPrevNow = performance.now(); // stutter state
+    const INTRO_SPEED = 18; // px/sec — slow crawl
+    function introTick(now){
+      introRaf = requestAnimationFrame(introTick);
+      if (running) return;
+      if (!introStart) introStart = now;
+      const elapsed = now - introStart;
+      // reveal / scramble pass
+      for (const r of introReveal){
+        if (r.el.classList.contains('on')) continue;
+        if (elapsed >= r.t){
+          r.el.classList.remove('pending'); r.el.classList.add('on'); r.el.textContent = r.ch;
+        } else if ((now|0) % 55 < 17){
+          r.el.textContent = SCRAMBLE_GLYPHS[(Math.random()*SCRAMBLE_GLYPHS.length)|0];
+        }
+      }
+      // upward crawl; once the whole block has passed, hold and start the outro.
+      // stutter: motion quantized to coarse steps plus brief random freezes,
+      // so the crawl advances like a sticking film reel rather than gliding
+      if (now >= introHoldUntil && Math.random() < 0.008)
+        introHoldUntil = now + 120 + Math.random()*580; // random hitch
+      if (now < introHoldUntil) introHeld += now - introPrevNow; // frozen frames don't advance the crawl
+      introPrevNow = now;
+      const wrapAt = introCrawl.scrollHeight + introGate.clientHeight + 60;
+      const rawY = Math.max(0, (elapsed - introHeld)/1000*INTRO_SPEED);
+      introScrollY = Math.min(Math.floor(rawY/3)*3, Math.max(1, wrapAt));
+      introCrawl.style.transform = 'translateY(' + (-introScrollY) + 'px)';
+      introGhostY += (introScrollY - introGhostY) * 0.05;
+      introGhost.style.transform = 'translateY(' + (-introGhostY) + 'px)';
+      if (now - introGhostSync > 220){ introGhostSync = now; introGhost.innerHTML = introCrawl.innerHTML; }
+      if (introScrollY >= wrapAt && !introStrobing) introOutro();
+    }
+    /* outro: 5 invert strobes with bouncing-ball timing — the gaps shrink
+       like a ball settling ( .      .   .  .  . . ) — then hard-cut to mode 1 */
+    let introStrobing = false;
+    function introOutro(){
+      introStrobing = true;
+      const GAPS = [600, 420, 290, 200, 140]; // ms between flashes, decelerating
+      const FLASH = 90; // how long each invert holds
+      let t = 200;
+      const timers = [];
+      GAPS.forEach((gap, i)=>{
+        t += gap;
+        timers.push(setTimeout(()=>introGate.classList.add('inv'), t));
+        timers.push(setTimeout(()=>{
+          introGate.classList.remove('inv');
+          if (i === GAPS.length-1 && !running) enter(); // cut to mode 1
+        }, t + FLASH));
+      });
+      disposers.push(()=>timers.forEach(clearTimeout));
+    }
+    introRaf = requestAnimationFrame(introTick);
+    /* scope cursor with fake depth: the ring rides the cursor exactly, the
+       full-screen h/v hairlines ease toward it a beat late and overshoot
+       slightly with parallax, so the crosshair reads as a deeper plane */
+    const introHairH = $('#introHairH'), introHairV = $('#introHairV');
+    let introMX = innerWidth/2, introMY = innerHeight/2;
+    let hairX = introMX, hairY = introMY;
+    on(document, 'mousemove', e=>{
+      if (running) return;
+      introMX = e.clientX; introMY = e.clientY;
+      introScope.style.left = introMX + 'px';
+      introScope.style.top = introMY + 'px';
+      const s = 1 + ((introMY/innerHeight) - 0.5)*0.24; // lower on screen = "closer"
+      introScope.style.transform = 'scale(' + s + ')';
+    });
+    function introHairTick(){
+      if (!running){
+        // parallax: hairlines aim slightly past the cursor from screen center
+        const tx = introMX + (introMX - innerWidth/2)*0.06;
+        const ty = introMY + (introMY - innerHeight/2)*0.06;
+        hairX += (tx - hairX)*0.12;
+        hairY += (ty - hairY)*0.12;
+        introHairH.style.transform = 'translateY(' + hairY + 'px)';
+        introHairV.style.transform = 'translateX(' + hairX + 'px)';
+        requestAnimationFrame(introHairTick);
+      }
+    }
+    requestAnimationFrame(introHairTick);
 
     on(window, 'mousemove', e=>{
       if (!running) return;
@@ -586,8 +896,8 @@ export default function ScopeOrgan() {
     });
     on(window, 'mousedown', e=>{
       if (!running) return;
-      if (e.target.closest && e.target.closest('.seq,.m3')) return;
-      if (mode3) return;
+      if (e.target.closest && e.target.closest('.seq,.m3,.settings,.destroy')) return;
+      if (mode3 || destroyMode) return;
       if (e.button === 2 && !orbital) scoped = true;
       if (e.button === 2 && orbital){ launchMissile(e.clientX, e.clientY, true); return; }
       if (locked){
@@ -757,6 +1067,7 @@ export default function ScopeOrgan() {
       m3formula.textContent = '=IF(' + label + rowTxt + ',"HIT","-")  ' + (v ? 'TRUE' : 'FALSE');
     }
     if (m3sheet){
+      m3sheet.replaceChildren(); // effect re-runs must not stack a second grid
       const thead = document.createElement('thead');
       const headRow = document.createElement('tr');
       headRow.appendChild(document.createElement('th')).className = 'corner';
@@ -937,7 +1248,15 @@ export default function ScopeOrgan() {
     orbCam.rotation.order = 'YXZ';
 
     /* sequencer clock */
-    let worldMode = false, step = 0, nextStep = 0;
+    /* worldMode = the drum-machine PANEL, opened only by M.
+       autopilot = the underlying "sequencer drives terrain + gun" logic —
+       worldMode always drives it, but mode3's tasking console also needs it
+       running with the panel kept off-screen, hence the separate flag. */
+    let worldMode = false, autopilot = false, autopilotForcedByMode3 = false;
+    let step = 0, nextStep = 0;
+    function stopAutopilotVisuals(){
+      cellEls.forEach(row=>row.forEach(c=>c.classList.remove('play')));
+    }
     function highlight(s){
       for (let r=0;r<4;r++) for (let c=0;c<STEPS;c++){
         cellEls[r][c].classList.toggle('play', c===s);
@@ -952,15 +1271,16 @@ export default function ScopeOrgan() {
     }
     function setWorldMode(v){
       worldMode = v;
+      autopilot = v || autopilotForcedByMode3;
       seqEl.classList.toggle('on', v);
       if (v){
         initAudio();
         if (actx.state === 'suspended') actx.resume();
         if (document.pointerLockElement === cvs) document.exitPointerLock();
         step = 0; nextStep = actx.currentTime + 0.1;
-        modeEl.textContent = 'autopilot engaged, 1 to close';
+        modeEl.textContent = 'autopilot engaged, M to close';
       } else {
-        cellEls.forEach(row=>row.forEach(c=>c.classList.remove('play')));
+        if (!autopilot) stopAutopilotVisuals();
         modeEl.textContent = locked ? 'mouse held, esc to release' : 'drag to look';
       }
     }
@@ -1026,6 +1346,7 @@ export default function ScopeOrgan() {
     function uiMotif(){
       if (!actx) return;
       const t = actx.currentTime;
+      if (playSample('fx', t, 0.3)) return;
       [[880, 0], [1108.7, 0.13]].forEach(([f, d])=>{
         const o = actx.createOscillator(); o.type='sine'; o.frequency.value = f;
         const g = actx.createGain();
@@ -1075,11 +1396,22 @@ export default function ScopeOrgan() {
         const row = document.createElement('div'); row.className = 'm3-row';
         const id = 'TCK-' + (1000 + ((Math.random()*9000)|0));
         const conf = 94 + ((Math.random()*6)|0);
-        const kind = ent.userData.kind === 'bird' ? 'Transient signal' : 'Anomaly cluster';
+        /* tasks read as obscure shooter chores; the feed column names which
+           quadrant (FPS operator view / topdown drone view) will show it land */
+        const M3_TASKS = ent.userData.kind === 'bird' ? [
+          'Declutter airspace layer', 'Archive transient signal',
+          'Dismiss false-positive flyer', 'Close loitering track'
+        ] : [
+          'Recycle octahedron marker', 'Rebalance beacon geometry',
+          'Reset lane waypoint', 'Recompute sightline mesh',
+          'Compact anomaly cluster', 'Renormalize sector lighting'
+        ];
+        const kind = M3_TASKS[(Math.random()*M3_TASKS.length)|0];
+        const feed = Math.random() < 0.5 ? 'FPS feed' : 'topdown feed';
         const left = document.createElement('div');
         left.innerHTML = '<div>' + id + ' · ' + kind + '</div>' +
           '<div class="meta">Sector ' + SECTORS[(Math.random()*8)|0] +
-          ' · flagged by system · confidence ' + conf + '% · pre-reviewed ✓</div>' +
+          ' · lands on ' + feed + ' · confidence ' + conf + '% · pre-reviewed ✓</div>' +
           '<div class="bar"><i></i></div>';
         const btn = document.createElement('button');
         btn.textContent = 'Approve';
@@ -1088,10 +1420,8 @@ export default function ScopeOrgan() {
           if (row.classList.contains('done')) return;
           row.classList.add('done', 'queued');
           btn.textContent = 'Queued';
+          // credit toward the daily goal only lands with the strike itself
           m3Queue.push({ent, row, btn});
-          resolvedCount++;
-          m3Goal.textContent = 'Daily goal ' + resolvedCount + '/12';
-          if (resolvedCount % 3 === 0) m3ToastShow(PRAISE[(Math.random()*PRAISE.length)|0]);
           const open = m3List.querySelectorAll('.m3-row:not(.done)').length;
           m3Open.textContent = open + ' open items';
           if (!open) setTimeout(m3Refresh, 4000);
@@ -1100,6 +1430,7 @@ export default function ScopeOrgan() {
         m3List.appendChild(row);
       });
       m3Open.textContent = pool.length + ' open items';
+      m3List.scrollTop = 0; // fresh batch starts back at the top
     }
     function setMode3(v){
       mode3 = v;
@@ -1110,13 +1441,16 @@ export default function ScopeOrgan() {
         if (document.pointerLockElement === cvs) document.exitPointerLock();
         m3NextBeat = actx.currentTime + M3_BT;
         m3Refresh();
-        if (!worldMode) setWorldMode(true); // the operation runs behind the console
-        seqEl.classList.remove('on');       // clock keeps ticking, panel stays out of frame
+        // the operation runs behind the console — force the autopilot logic
+        // on, but never the M-only drum-machine panel itself
+        if (!autopilot){ autopilot = true; autopilotForcedByMode3 = true; step = 0; nextStep = actx.currentTime + 0.1; }
         el.hud.classList.add('mini');
         el.drone.classList.add('on', 'mini');
         modeEl.textContent = 'tasking console, 3 to close';
       } else {
-        if (worldMode) seqEl.classList.add('on');
+        if (autopilotForcedByMode3 && !worldMode){
+          autopilot = false; autopilotForcedByMode3 = false; stopAutopilotVisuals();
+        }
         el.hud.classList.remove('mini');
         el.drone.classList.remove('mini');
         el.drone.classList.toggle('on', orbital);
@@ -1127,6 +1461,314 @@ export default function ScopeOrgan() {
       // the world gets quiet and far away in here
       if (actx && shelf) shelf.frequency.linearRampToValueAtTime(v ? 700 : 5200, actx.currentTime + 0.8);
     }
+
+    /* ---------------------------------------------------- "." settings panel
+       audio driver/output routing plus the user sample kit: pick a folder,
+       every audio file in it (recursively) is decoded, trimmed to 5s, and
+       becomes assignable to shot / impact / drums / drone. */
+    let settingsOpen = false;
+    const setEl = $('#settings'), setSink = $('#setSink'), setFolder = $('#setFolder'),
+      setCount = $('#setCount'), setSlots = $('#setSlots');
+    const SLOT_DEFS = [
+      ['shot',   'SHOOTING · FIRE'],
+      ['impact', 'SHOOTING · IMPACT FX'],
+      ['kick',   'KICK'],
+      ['snr',    'SNARE'],
+      ['hat',    'HIHAT'],
+      ['prc',    'PERC'],
+      ['drone',  'DRONE BED (LOOPED)'],
+      ['fx',     'UI / FX'],
+      ['cine',   'CINEMATIC (BRAAM)'],
+    ];
+    const slotSelects = {};
+    SLOT_DEFS.forEach(([key, label])=>{
+      const wrap = document.createElement('div');
+      wrap.className = 'set-slot';
+      const lab = document.createElement('label'); lab.textContent = label;
+      const sel = document.createElement('select');
+      sel.appendChild(new Option('synth (default)', '-1'));
+      sel.addEventListener('change', ()=>{
+        ensureAudio();
+        sampleMap[key] = parseInt(sel.value, 10);
+        if (key === 'drone') applyDroneSample();
+        else playSample(key, actx.currentTime, 0.4); // audition on assign
+      });
+      wrap.appendChild(lab); wrap.appendChild(sel);
+      setSlots.appendChild(wrap);
+      slotSelects[key] = sel;
+    });
+    function refreshSlotOptions(){
+      SLOT_DEFS.forEach(([key])=>{
+        const sel = slotSelects[key];
+        const cur = sel.value;
+        sel.replaceChildren(new Option('synth (default)', '-1'));
+        if (sampleLib.length) sel.appendChild(new Option('random (pool)', '-2'));
+        sampleLib.forEach((s, i)=>sel.appendChild(new Option(s.name, String(i))));
+        if (cur !== '-1' && [...sel.options].some(o=>o.value===cur)){
+          sel.value = cur;
+        } else if (sampleLib.length){
+          /* a fresh pool wires every untouched slot to random-pick by default */
+          sel.value = '-2';
+          sampleMap[key] = POOL;
+          if (key === 'drone') applyDroneSample();
+        } else {
+          sel.value = '-1';
+        }
+      });
+    }
+    async function refreshSinks(){
+      if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+      const devs = await navigator.mediaDevices.enumerateDevices();
+      const outs = devs.filter(d=>d.kind === 'audiooutput');
+      setSink.replaceChildren();
+      outs.forEach((d, i)=>setSink.appendChild(
+        new Option(d.label || ('Output ' + (i+1)), d.deviceId)));
+      if (!outs.length) setSink.appendChild(new Option('default', ''));
+    }
+    on(setSink, 'change', async ()=>{
+      ensureAudio();
+      if (typeof actx.setSinkId === 'function'){
+        try { await actx.setSinkId(setSink.value === 'default' ? '' : setSink.value); }
+        catch(err){ setCount.textContent = 'output switch failed: ' + err.message; }
+      } else {
+        setCount.textContent = 'this browser cannot route AudioContext output (needs setSinkId)';
+      }
+    });
+    const AUDIO_EXT = /\.(wav|mp3|ogg|oga|flac|m4a|aac|aif|aiff|webm)$/i;
+    function trimBuffer(buf){
+      const MAX_S = 5;
+      if (buf.duration <= MAX_S) return buf;
+      const len = Math.floor(MAX_S * buf.sampleRate);
+      const out = actx.createBuffer(buf.numberOfChannels, len, buf.sampleRate);
+      for (let c=0;c<buf.numberOfChannels;c++)
+        out.getChannelData(c).set(buf.getChannelData(c).subarray(0, len));
+      return out;
+    }
+    on(setFolder, 'change', async e=>{
+      ensureAudio();
+      const files = [...e.target.files].filter(f=>AUDIO_EXT.test(f.name));
+      setCount.textContent = 'decoding ' + files.length + ' file(s)…';
+      let ok = 0;
+      for (const f of files){
+        try {
+          const buf = await actx.decodeAudioData(await f.arrayBuffer());
+          sampleLib.push({name: f.name.replace(/\.[^.]+$/, ''), buffer: trimBuffer(buf)});
+          ok++;
+        } catch(err){ /* skip undecodable files */ }
+      }
+      setCount.textContent = ok + ' sample(s) loaded (max 5s each, ADSR-capped at 2s on trigger)';
+      refreshSlotOptions();
+    });
+    function setSettings(v){
+      settingsOpen = v;
+      setEl.classList.toggle('on', v);
+      if (v){
+        if (document.pointerLockElement === cvs) document.exitPointerLock();
+        refreshSinks();
+      }
+    }
+    on($('#setClose'), 'click', ()=>setSettings(false));
+
+    /* ------------------------------------------------- mode 4: destroyer
+       a metagame in the lineage of Desktop Destroyer: 4 freezes the live
+       render into a screenshot, and the player defaces the game itself —
+       cracks, bullet holes, glitch smears — each hit with its own noise. */
+    let destroyMode = false, destroyTool = 'hammer', destroySpray = 0;
+    const destroyEl = $('#destroy'), destroyCvs = $('#destroyCanvas');
+    const bratEl = $('#brat'), bratWord = $('#bratWord');
+    const dctx = destroyCvs.getContext('2d');
+    function setDestroy(v){
+      destroyMode = v;
+      destroyEl.classList.toggle('on', v);
+      if (v){
+        ensureAudio();
+        if (document.pointerLockElement === cvs) document.exitPointerLock();
+        /* live overlay: the game keeps running underneath; the damage layer
+           is transparent and just accumulates marks on top of it */
+        destroyCvs.width = innerWidth; destroyCvs.height = innerHeight;
+        dctx.clearRect(0, 0, destroyCvs.width, destroyCvs.height);
+        destroyPrev = performance.now();
+        destroyRaf = requestAnimationFrame(destroyTick);
+        modeEl.textContent = 'destroyer engaged, 4 to exit';
+      } else {
+        cancelAnimationFrame(destroyRaf);
+        virusSites.length = 0;
+        droneAgent = null;
+        destroyDroneEl.classList.remove('on');
+        destroyStrobeEl.classList.remove('on');
+        modeEl.textContent = locked ? 'mouse held, esc to release' : 'drag to look';
+      }
+    }
+    function noiseHit(kind){
+      if (!actx) return;
+      const t = actx.currentTime;
+      const n = actx.createBufferSource(); n.buffer = noiseBuf;
+      const f = actx.createBiquadFilter();
+      const g = actx.createGain();
+      if (kind === 'hammer'){
+        n.playbackRate.value = 0.5; f.type = 'lowpass'; f.frequency.value = 900;
+        g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t+0.18);
+      } else if (kind === 'gun'){
+        n.playbackRate.value = 1.8; f.type = 'bandpass'; f.frequency.value = 2600; f.Q.value = 1.2;
+        g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.0001, t+0.07);
+      } else {
+        n.playbackRate.value = 3.0; f.type = 'highpass'; f.frequency.value = 3200;
+        g.gain.setValueAtTime(0.22, t); g.gain.exponentialRampToValueAtTime(0.0001, t+0.3);
+      }
+      n.connect(f); f.connect(g); g.connect(uiBus); n.start(t); n.stop(t+0.35);
+    }
+    function drawCrack(x, y){
+      dctx.save();
+      dctx.strokeStyle = 'rgba(10,10,10,0.9)';
+      for (let i=0;i<7;i++){
+        const a = Math.random()*Math.PI*2;
+        let px = x, py = y;
+        dctx.lineWidth = 1.6;
+        dctx.beginPath(); dctx.moveTo(px, py);
+        for (let s=0;s<5;s++){
+          px += Math.cos(a + (Math.random()-0.5)*1.2) * (8 + Math.random()*26);
+          py += Math.sin(a + (Math.random()-0.5)*1.2) * (8 + Math.random()*26);
+          dctx.lineTo(px, py);
+        }
+        dctx.stroke();
+      }
+      dctx.fillStyle = 'rgba(0,0,0,0.85)';
+      dctx.beginPath(); dctx.arc(x, y, 4 + Math.random()*3, 0, Math.PI*2); dctx.fill();
+      dctx.restore();
+    }
+    function drawHole(x, y){
+      dctx.save();
+      const r = 4 + Math.random()*3;
+      const grad = dctx.createRadialGradient(x, y, 0, x, y, r*3);
+      grad.addColorStop(0, 'rgba(0,0,0,0.95)');
+      grad.addColorStop(0.4, 'rgba(60,60,60,0.6)');
+      grad.addColorStop(1, 'rgba(120,120,120,0)');
+      dctx.fillStyle = grad;
+      dctx.beginPath(); dctx.arc(x, y, r*3, 0, Math.PI*2); dctx.fill();
+      dctx.fillStyle = '#000';
+      dctx.beginPath(); dctx.arc(x, y, r, 0, Math.PI*2); dctx.fill();
+      dctx.restore();
+    }
+    function drawGlitch(x, y){
+      /* grab horizontal slices of the LIVE render and smear them sideways —
+         frozen misregistered strips of the game hang over the moving game */
+      const src = renderer.domElement;
+      /* WebGL buffer isn't preserved between frames — redraw the last post
+         pass right now so the pixels are actually there to copy */
+      renderer.setRenderTarget(null);
+      renderer.render(postScene, postCam);
+      const sy2 = src.height / innerHeight;
+      for (let i=0;i<6;i++){
+        const yy = y - 30 + Math.random()*60;
+        const h = 3 + Math.random()*10;
+        const shift = (Math.random()-0.5)*160;
+        dctx.drawImage(src, 0, yy*sy2, src.width, h*sy2, shift, yy, innerWidth, h);
+      }
+      dctx.save();
+      dctx.globalCompositeOperation = 'screen';
+      dctx.fillStyle = 'rgba(255,0,60,0.25)';
+      dctx.fillRect(0, y - 20 + Math.random()*10, destroyCvs.width, 14 + Math.random()*24);
+      dctx.restore();
+    }
+    /* hammer strobe: two fast whole-screen inverts per blow */
+    const destroyStrobeEl = $('#destroyStrobe');
+    let destroyStrobeTimers = [];
+    function destroyStrobe(){
+      destroyStrobeTimers.forEach(clearTimeout);
+      destroyStrobeTimers = [0, 90, 180, 270].map((d, i)=>setTimeout(()=>{
+        destroyStrobeEl.classList.toggle('on', i % 2 === 0);
+      }, d));
+    }
+    disposers.push(()=>destroyStrobeTimers.forEach(clearTimeout));
+    /* virus: infection sites that keep eating outward until mode 4 closes */
+    const virusSites = [];
+    function drawVirusFrame(dt){
+      for (const s of virusSites){
+        s.r = Math.min(s.max, s.r + dt*26);
+        for (let i=0;i<6;i++){
+          const a = Math.random()*Math.PI*2;
+          const rr = s.r * (0.55 + Math.random()*0.45);
+          const x = s.x + Math.cos(a)*rr, y = s.y + Math.sin(a)*rr;
+          dctx.fillStyle = Math.random() < 0.82 ? 'rgba(0,0,0,0.9)' : 'rgba(124,255,43,0.55)';
+          dctx.beginPath();
+          dctx.arc(x, y, 2 + Math.random()*5, 0, Math.PI*2);
+          dctx.fill();
+        }
+        if (Math.random() < dt*1.5) noiseHit('glitch'); // intermittent chewing
+      }
+    }
+    /* drone agent: flies in from an edge and strafes the screen, leaving a
+       trail of holes and glitch tears until its run expires */
+    const destroyDroneEl = $('#destroyDrone');
+    let droneAgent = null;
+    function spawnDroneAgent(){
+      const fromLeft = Math.random() < 0.5;
+      droneAgent = {
+        x: fromLeft ? -40 : innerWidth + 40, y: Math.random()*innerHeight*0.6 + 40,
+        tx: Math.random()*innerWidth, ty: Math.random()*innerHeight*0.7 + 60,
+        life: 4.5, fire: 0
+      };
+      destroyDroneEl.classList.add('on');
+      braam();
+    }
+    function drawDroneFrame(dt){
+      const d = droneAgent;
+      if (!d) return;
+      d.life -= dt;
+      const dx = d.tx - d.x, dy = d.ty - d.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 30){ d.tx = Math.random()*innerWidth; d.ty = Math.random()*innerHeight*0.8; }
+      const sp = 380;
+      d.x += dx/Math.max(1, dist)*sp*dt;
+      d.y += dy/Math.max(1, dist)*sp*dt;
+      destroyDroneEl.style.transform = 'translate(' + d.x + 'px,' + d.y + 'px) translate(-50%,-50%) rotate(' + (Math.atan2(dy, dx)*57.3) + 'deg)';
+      d.fire -= dt;
+      if (d.fire <= 0){
+        d.fire = 0.08;
+        drawHole(d.x + (Math.random()-0.5)*46, d.y + 14 + Math.random()*30);
+        if (Math.random() < 0.25) drawGlitch(d.x, d.y);
+        noiseHit('gun');
+      }
+      if (d.life <= 0){ droneAgent = null; destroyDroneEl.classList.remove('on'); }
+    }
+    let destroyRaf = 0, destroyPrev = 0;
+    function destroyTick(now){
+      if (!destroyMode) return;
+      destroyRaf = requestAnimationFrame(destroyTick);
+      const dt = Math.min(0.05, (now - destroyPrev)/1000);
+      destroyPrev = now;
+      drawVirusFrame(dt);
+      drawDroneFrame(dt);
+    }
+    function destroyHit(x, y){
+      if (destroyTool === 'hammer'){ drawCrack(x, y); noiseHit('hammer'); destroyStrobe(); }
+      else if (destroyTool === 'gun'){ drawHole(x, y); noiseHit('gun'); }
+      else if (destroyTool === 'virus'){
+        virusSites.push({x, y, r: 8, max: 120 + Math.random()*140});
+        noiseHit('glitch');
+      }
+      else { drawGlitch(x, y); noiseHit('glitch'); }
+    }
+    on(destroyEl, 'mousedown', e=>{
+      if (!destroyMode) return;
+      destroyHit(e.clientX, e.clientY);
+      if (destroyTool === 'gun') destroySpray = 1; // hold to spray
+    });
+    on(window, 'mouseup', ()=>{ destroySpray = 0; });
+    on(destroyEl, 'mousemove', e=>{
+      if (destroyMode && destroySpray && Math.random() < 0.5) destroyHit(e.clientX, e.clientY);
+    });
+    /* T: BRAT-style cover naming the current tool, strobing red/black */
+    let bratTimers = [];
+    function bratFlash(){
+      bratTimers.forEach(clearTimeout); bratTimers = [];
+      bratWord.textContent = destroyTool === 'gun' ? 'machine gun' : destroyTool;
+      bratEl.classList.add('on'); bratEl.classList.remove('inv');
+      for (let i=1;i<=6;i++)
+        bratTimers.push(setTimeout(()=>bratEl.classList.toggle('inv'), i*110));
+      bratTimers.push(setTimeout(()=>bratEl.classList.remove('on'), 1300));
+    }
+    disposers.push(()=>bratTimers.forEach(clearTimeout));
 
     /* strobe: 0 wakes the strobe rig */
     let strobe = false, strobeK = 1, dkV = 1, bloomV = 0;
@@ -1142,12 +1784,42 @@ export default function ScopeOrgan() {
       }
     }
 
+    /* 1/2/3 are exclusive VIEWS (3d / topdown / 4-quadrant console) — pressing
+       one closes whichever of the other two is open, and none of them touch
+       the drum machine. M is the only thing that opens/closes the drum
+       machine (worldMode); it can be toggled underneath any view. */
+    function setView(n){
+      if (n === 4){
+        /* destroyer is an overlay, not a view: keep whatever is showing;
+           from the plain 3d view it defaults to the mode-3 control room */
+        if (!orbital && !mode3) setMode3(true);
+        setDestroy(true);
+        return;
+      }
+      if (destroyMode) setDestroy(false);
+      if (n !== 2 && orbital) setOrbital(false);
+      if (n !== 3 && mode3) setMode3(false);
+      if (n === 2) setOrbital(true);
+      if (n === 3) setMode3(true);
+    }
     on(window, 'keydown', e=>{
       if (e.repeat) return;
-      if (e.code === 'Digit1') setWorldMode(!worldMode);
-      if (e.code === 'Digit2') setOrbital(!orbital);
-      if (e.code === 'Digit3') setMode3(!mode3);
+      if (!running){ if (e.code === 'Digit1') enter(); return; } // 1 skips the intro
+      if (e.code === 'Digit1') setView(1);
+      if (e.code === 'Digit2') setView(orbital ? 1 : 2);
+      if (e.code === 'Digit3') setView(mode3 ? 1 : 3);
+      if (e.code === 'Digit4'){ if (destroyMode) setDestroy(false); else setView(4); }
+      if (e.code === 'KeyM') setWorldMode(!worldMode);
       if (e.code === 'Digit0') setStrobe(!strobe);
+      if (e.code === 'Period') setSettings(!settingsOpen);
+      if (destroyMode){
+        if (e.code === 'KeyQ') destroyTool = 'hammer';
+        if (e.code === 'KeyW') destroyTool = 'gun';
+        if (e.code === 'KeyE') destroyTool = 'glitch';
+        if (e.code === 'KeyR') destroyTool = 'virus';
+        if (e.code === 'KeyY') spawnDroneAgent();
+        if (e.code === 'KeyT') bratFlash();
+      }
     });
 
     /* ---------------------------------------------------------- firing */
@@ -1304,6 +1976,7 @@ export default function ScopeOrgan() {
     function boom(){
       if (!actx) return;
       const t = actx.currentTime;
+      if (playSample('impact', t, 0.7)) return;
       const o = actx.createOscillator(); o.type='sine';
       o.frequency.setValueAtTime(90, t); o.frequency.exponentialRampToValueAtTime(24, t+0.5);
       const g = actx.createGain();
@@ -1320,6 +1993,7 @@ export default function ScopeOrgan() {
     function braam(){
       if (!actx) return;
       const t = actx.currentTime;
+      if (playSample('cine', t, 0.7)) return;
       const root = 55;
       [1, 1.494, 2.01, 0.5].forEach((mul, i)=>{
         const o = actx.createOscillator(); o.type = 'sawtooth';
@@ -1406,7 +2080,7 @@ export default function ScopeOrgan() {
       const time = now/1000;
 
       /* sequencer clock */
-      if (worldMode && actx){
+      if (autopilot && actx){
         // after a long RAF stall (hidden tab), skip missed steps instead of bursting them
         if (actx.currentTime - nextStep > 0.5) nextStep = actx.currentTime + 0.05;
         while (nextStep < actx.currentTime + 0.12){
@@ -1432,6 +2106,9 @@ export default function ScopeOrgan() {
           uiDing(m3Melody++);
           const dur = strikeEntity(job.ent, ()=>{
             job.btn.textContent = 'Resolved ✓';
+            resolvedCount++;
+            m3Goal.textContent = 'Daily goal ' + resolvedCount + '/12';
+            if (resolvedCount % 3 === 0) m3ToastShow(PRAISE[(Math.random()*PRAISE.length)|0]);
             if (mode3){
               m3El.classList.add('hit');
               setTimeout(()=>m3El.classList.remove('hit'), 200);
@@ -1439,6 +2116,8 @@ export default function ScopeOrgan() {
           });
           job.btn.textContent = 'Resolving…';
           job.row.classList.remove('queued');
+          // keep the working row in frame as the queue advances
+          job.row.scrollIntoView({behavior:'smooth', block:'nearest'});
           const barWrap = job.row.querySelector('.bar');
           if (barWrap){
             barWrap.style.opacity = 1;
@@ -1506,7 +2185,7 @@ export default function ScopeOrgan() {
       let str = (keys.KeyD?1:0) - (keys.KeyA?1:0);
 
       /* autopilot: the player is a bot while the sequencer runs */
-      if (worldMode && !orbital){
+      if (autopilot && !orbital){
         let best = null, bd = Infinity;
         for (const t of [...targets, ...birds]) if (t.userData.alive){
           const d = t.position.distanceTo(camera.position);
@@ -1821,14 +2500,14 @@ export default function ScopeOrgan() {
             flash('#ffffff', 0.16); // each trigger blinks the screen
             crackBurst(f.position, f.material.color.getHex()); // each pop cracks its own fan of lines
             for (let pi=0;pi<3;pi++){
-              const p = new THREE.Mesh(new THREE.TetrahedronGeometry(0.3+Math.random()*0.4),
-                new THREE.MeshBasicMaterial({color:0xffffff, transparent:true}));
+              const p = new THREE.Mesh(UNIT_TET, new THREE.MeshBasicMaterial({color:0xffffff, transparent:true}));
+              p.scale.setScalar(0.3+Math.random()*0.4);
               p.position.copy(f.position);
               p.userData = {v:new THREE.Vector3((Math.random()-0.5)*8, 3+Math.random()*4, (Math.random()-0.5)*8),
                 spin:new THREE.Vector3(4, 4, 4), life:0.45};
               scene.add(p); debris.push(p);
             }
-            scene.remove(f); f.geometry.dispose(); f.material.dispose();
+            scene.remove(f); f.material.dispose();
             g.frags[g.idx] = null;
             g.idx++;
             g.nextTrig = now + 220;
@@ -1846,18 +2525,20 @@ export default function ScopeOrgan() {
         d.rotation.x += d.userData.spin.x*dt;
         d.rotation.z += d.userData.spin.z*dt;
         d.material.opacity = Math.max(0, d.userData.life/1.4);
-        if (d.userData.life <= 0){ scene.remove(d); d.geometry.dispose(); d.material.dispose(); debris.splice(i,1); }
+        if (d.userData.life <= 0){ scene.remove(d); d.material.dispose(); debris.splice(i,1); }
       }
 
       /* crack lines: true infinite-reading edges, drawn through the impact point
-         rather than as local segments — they just fade, geometry never moves */
+         rather than as local segments — they just fade, geometry never moves.
+         lines/lights are pooled (see burstLightPool/crackLinePool above), so
+         "release" just means hide/zero it, never remove-from-scene or dispose */
       for (let i=shatterLines.length-1;i>=0;i--){
         const s = shatterLines[i];
         const age = (now - s.t0)/1000;
         const k = Math.max(0, 1 - age/s.life);
         s.line.material.opacity = k*k*0.95;
         if (age >= s.life){
-          scene.remove(s.line); s.line.geometry.dispose(); s.line.material.dispose();
+          s.line.visible = false;
           shatterLines.splice(i, 1);
         }
       }
@@ -1866,7 +2547,7 @@ export default function ScopeOrgan() {
         const age = (now - b.t0)/1000;
         const k = Math.max(0, 1 - age/b.life);
         b.light.intensity = 9*k*k;
-        if (age >= b.life){ scene.remove(b.light); burstLights.splice(i, 1); }
+        if (age >= b.life){ b.light.intensity = 0; burstLights.splice(i, 1); }
       }
 
       /* flash decay */
@@ -1905,7 +2586,11 @@ export default function ScopeOrgan() {
         renderer.setScissorTest(false);
         renderer.setRenderTarget(rt);
         renderer.clear();
+        /* the agents are single pixels from 130m up in a half-res quad —
+           inflate them for this render pass only so the feed reads their motion */
+        for (const b of birds) if (b.userData.alive) b.scale.multiplyScalar(3.5);
         renderer.render(scene, orbCam);
+        for (const b of birds) if (b.userData.alive) b.scale.multiplyScalar(1/3.5);
         renderer.setRenderTarget(null);
         postMat.uniforms.xr.value = 1;
         postMat.uniforms.camY.value = 130;
@@ -2049,22 +2734,65 @@ export default function ScopeOrgan() {
 
       <div className="seq" id="seq">
         <svg id="seqgrid" viewBox="-100 -100 200 200"></svg>
-        <div className="cap">WORLD SEQUENCER &middot; AUTOPILOT &mdash; 1 CLOSE &middot; TAP ARCS</div>
+        <div className="cap">WORLD SEQUENCER &middot; AUTOPILOT &mdash; M CLOSE &middot; TAP ARCS</div>
+      </div>
+
+      <div className="destroy" id="destroy">
+        <canvas id="destroyCanvas"></canvas>
+        <div className="destroy-strobe" id="destroyStrobe"></div>
+        <div className="destroy-drone" id="destroyDrone">◆</div>
+        <div className="destroy-hud">
+          MODE 4 · DESKTOP DESTROYER — CLICK TO DAMAGE · <span className="key">Q</span> HAMMER
+          · <span className="key">W</span> MACHINE GUN · <span className="key">E</span> GLITCH
+          · <span className="key">R</span> VIRUS · <span className="key">Y</span> DRONE
+          · <span className="key">T</span> COVER · <span className="key">4</span> EXIT
+        </div>
+      </div>
+      <div className="brat" id="brat"><span id="bratWord">hammer</span></div>
+
+      <div className="settings" id="settings">
+        <div className="set-card">
+          <div className="set-head">
+            <span className="set-title">AUDIO SETTINGS</span>
+            <span className="set-close" id="setClose">[ . ] CLOSE</span>
+          </div>
+          <div className="set-row">
+            <label>OUTPUT DEVICE</label>
+            <select id="setSink"></select>
+          </div>
+          <div className="set-row">
+            <label>SAMPLE FOLDER</label>
+            <div className="set-file">
+              <input type="file" id="setFolder" webkitdirectory="" directory="" multiple />
+              <span className="set-note" id="setCount">no samples loaded — folder is scanned recursively, files trimmed to 5s</span>
+            </div>
+          </div>
+          <div className="set-grid" id="setSlots"></div>
+        </div>
       </div>
 
       <div className="gate" id="gate">
-        <div className="card">
-          <h1>THE ABSTRACTION IS THE WEAPON</h1>
-          <p><span className="key">WASD</span> walk. <span className="key">SHIFT</span> hurry. <span className="key">SPACE</span> hop &mdash; hold it against a wall to scramble up and stand on the roof.</p>
-          <p><span className="key">MOUSE</span> look. If the browser refuses to hide the cursor, drag instead. The corner tells you which mode you got.</p>
-          <p><span className="key">RIGHT MOUSE</span> hold to glass the horizon. <span className="key">LEFT MOUSE</span> fire, or <span className="key">ARROWS</span> to turn if the mouse is being difficult.</p>
-          <p>Targets are the spinning octahedrons on the pale beams. The corner readout gives you a bearing to the closest one.</p>
-          <p>Every confirmed hit retunes the ground and repaints the sky. The drone follows. That is the whole instrument.</p>
-          <p><span className="key">1</span> opens the world sequencer: a drum machine that shakes the terrain while an autopilot takes your gun. White arrows show where everything is headed.</p>
-          <p><span className="key">2</span> ascends to the orbital feed: <span className="key">LEFT CLICK</span> calls a missile down. <span className="key">RIGHT CLICK</span> drops leaflets instead; whatever reads them lays down its arms.</p>
-          <p><span className="key">3</span> opens the tasking console. It is the most comfortable way to do the worst thing.</p>
-          <p><span className="key">0</span> strikes the braam and wakes the strobe rig: nine colored lights circling the dome, flashing in turn.</p>
-          <div className="go">CLICK TO ENTER</div>
+        <div className="introBg">
+          <div className="introLens" />
+          <div className="introHalftone" />
+          <div className="introScan" />
+          <div className="introGrain" />
+        </div>
+        <div className="introCrawlWrap">
+          <div className="introGhost" id="introGhost" />
+          <div className="introCrawl" id="introCrawl" />
+        </div>
+        <div className="introFlash" id="introFlash" />
+        <div className="introHairH" id="introHairH" />
+        <div className="introHairV" id="introHairV" />
+        <div className="introScope" id="introScope">
+          <svg viewBox="0 0 52 52">
+            <circle cx="26" cy="26" r="15" />
+            <line x1="26" y1="2" x2="26" y2="14" />
+            <line x1="26" y1="38" x2="26" y2="50" />
+            <line x1="2" y1="26" x2="14" y2="26" />
+            <line x1="38" y1="26" x2="50" y2="26" />
+          </svg>
         </div>
       </div>
     </div>
