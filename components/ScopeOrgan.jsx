@@ -377,6 +377,7 @@ export default function ScopeOrgan() {
       }
       o.connect(flt); flt.connect(g); g.connect(pan); pan.connect(master);
       o.start(t); o.stop(t+0.4);
+      o.onended = reap(o, flt, g, pan);
     }
 
     /* debris */
@@ -457,6 +458,14 @@ export default function ScopeOrgan() {
       n.connect(bp); bp.connect(ng); ng.connect(master); n.start();
       drift = bp;
     }
+    /* explicitly drop node references once their sound finishes — over a long
+       autopilot session, hundreds of transient hits/drums otherwise leave the
+       audio graph full of stopped-but-still-connected nodes and the mix bogs
+       down. Attach the return value as .onended on that call's longest-lived
+       source node. */
+    function reap(...nodes){
+      return ()=>{ nodes.forEach(nd=>{ try{ nd.disconnect(); }catch(e){} }); };
+    }
     function retune(root){
       if (!actx) return;
       const t = actx.currentTime;
@@ -504,6 +513,7 @@ export default function ScopeOrgan() {
       const d = actx.createDelay(); d.delayTime.value = Math.min(0.45, dist/340 + 0.06);
       const dg = actx.createGain(); dg.gain.value = 0.28;
       cg.connect(d); d.connect(dg); dg.connect(master);
+      car.onended = reap(p, car, mod, mg, cg, sub, sg, n2, hp, ng, d, dg);
     }
     /* -------- user sample kit: loaded from the "." settings panel -------
        sampleLib holds decoded buffers; sampleMap wires a lib index into each
@@ -534,6 +544,7 @@ export default function ScopeOrgan() {
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);          // R
       src.connect(g); g.connect(master);
       src.start(t); src.stop(t + dur + 0.02);
+      src.onended = reap(src, g);
       return true;
     }
     /* drone slot: loops the chosen sample under the world in place of the
@@ -542,7 +553,12 @@ export default function ScopeOrgan() {
     function applyDroneSample(){
       if (!actx) return;
       const t = actx.currentTime;
-      if (droneSrc){ try { droneSrc.stop(t + 0.6); } catch(e){} droneSrc = null; }
+      if (droneSrc){
+        const oldSrc = droneSrc, oldGain = droneSampleGain;
+        oldSrc.onended = reap(oldSrc, oldGain);
+        try { oldSrc.stop(t + 0.6); } catch(e){}
+        droneSrc = null;
+      }
       if (droneSampleGain){ droneSampleGain.gain.linearRampToValueAtTime(0, t + 0.6); droneSampleGain = null; }
       const idx = resolveSampleIdx('drone'); // pool mode re-rolls the bed each apply
       if (idx < 0 || !sampleLib[idx]){
@@ -574,6 +590,7 @@ export default function ScopeOrgan() {
       const og = actx.createGain();
       og.gain.setValueAtTime(0.16, t); og.gain.exponentialRampToValueAtTime(0.0001, t+0.12);
       o.connect(og); og.connect(master); o.start(t); o.stop(t+0.14);
+      n.onended = reap(n, f, g, o, og);
     }
 
     const DRUM_SLOTS = ['kick', 'snr', 'hat', 'prc'];
@@ -586,6 +603,7 @@ export default function ScopeOrgan() {
         const g = actx.createGain();
         g.gain.setValueAtTime(0.5, t); g.gain.exponentialRampToValueAtTime(0.0001, t+0.28);
         o.connect(g); g.connect(master); o.start(t); o.stop(t+0.3);
+        o.onended = reap(o, g);
       } else if (r === 1){ // snare
         const n = actx.createBufferSource(); n.buffer = noiseBuf;
         const f = actx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=1800; f.Q.value=0.8;
@@ -596,12 +614,14 @@ export default function ScopeOrgan() {
         const og = actx.createGain();
         og.gain.setValueAtTime(0.22, t); og.gain.exponentialRampToValueAtTime(0.0001, t+0.1);
         o.connect(og); og.connect(master); o.start(t); o.stop(t+0.12);
+        n.onended = reap(n, f, g, o, og);
       } else if (r === 2){ // hat
         const n = actx.createBufferSource(); n.buffer = noiseBuf; n.playbackRate.value = 1.4;
         const f = actx.createBiquadFilter(); f.type='highpass'; f.frequency.value=6000;
         const g = actx.createGain();
         g.gain.setValueAtTime(0.16, t); g.gain.exponentialRampToValueAtTime(0.0001, t+0.05);
         n.connect(f); f.connect(g); g.connect(master); n.start(t); n.stop(t+0.07);
+        n.onended = reap(n, f, g);
       } else { // perc blip tuned to the current palette root
         const root = PALETTES[palIndex % PALETTES.length].root * 8;
         const o = actx.createOscillator(); o.type='square';
@@ -610,6 +630,7 @@ export default function ScopeOrgan() {
         const g = actx.createGain();
         g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.0001, t+0.12);
         o.connect(g); g.connect(master); o.start(t); o.stop(t+0.14);
+        o.onended = reap(o, g);
       }
     }
 
@@ -1139,6 +1160,7 @@ export default function ScopeOrgan() {
       g.gain.exponentialRampToValueAtTime(0.0001, t+0.6);
       o.connect(g); o2.connect(g); g.connect(master);
       o.start(t); o2.start(t); o.stop(t+0.65); o2.stop(t+0.65);
+      o.onended = reap(o, o2, g);
     }
 
     function worldHit(r){
@@ -1332,6 +1354,7 @@ export default function ScopeOrgan() {
         g.gain.exponentialRampToValueAtTime(g0, t+0.012);
         g.gain.exponentialRampToValueAtTime(0.0001, t+0.5);
         o.connect(g); g.connect(uiBus); o.start(t); o.stop(t+0.55);
+        o.onended = reap(o, g);
       });
     }
     function uiTick(i){
@@ -1342,6 +1365,7 @@ export default function ScopeOrgan() {
       g.gain.setValueAtTime(0.055, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t+0.05);
       o.connect(g); g.connect(uiBus); o.start(t); o.stop(t+0.06);
+      o.onended = reap(o, g);
     }
     function uiMotif(){
       if (!actx) return;
@@ -1354,6 +1378,7 @@ export default function ScopeOrgan() {
         g.gain.exponentialRampToValueAtTime(0.12, t+d+0.015);
         g.gain.exponentialRampToValueAtTime(0.0001, t+d+0.35);
         o.connect(g); g.connect(uiBus); o.start(t+d); o.stop(t+d+0.4);
+        o.onended = reap(o, g);
       });
     }
     function uiShuffle(){
@@ -1365,6 +1390,7 @@ export default function ScopeOrgan() {
       g.gain.setValueAtTime(0.05, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t+0.18);
       n.connect(f); f.connect(g); g.connect(uiBus); n.start(t); n.stop(t+0.2);
+      n.onended = reap(n, f, g);
     }
     const SECTORS = ['NE','NW','SE','SW','N','S','E','W'];
     const PRAISE = ['Nice pace!','Queue is looking clean.','Great work today.',
@@ -1544,19 +1570,25 @@ export default function ScopeOrgan() {
         out.getChannelData(c).set(buf.getChannelData(c).subarray(0, len));
       return out;
     }
+    const MAX_POOL = 320; // bound the pool (200-400) so a huge folder can't hang the decoder
     on(setFolder, 'change', async e=>{
       ensureAudio();
-      const files = [...e.target.files].filter(f=>AUDIO_EXT.test(f.name));
-      setCount.textContent = 'decoding ' + files.length + ' file(s)…';
+      const found = [...e.target.files].filter(f=>AUDIO_EXT.test(f.name));
+      const files = found.slice(0, MAX_POOL);
+      const capped = found.length > files.length;
+      setCount.textContent = 'decoding ' + files.length + ' file(s)' +
+        (capped ? ' (capped from ' + found.length + ')' : '') + '…';
       let ok = 0;
-      for (const f of files){
+      for (const f of files){ // decoded and pushed one at a time, never all at once
         try {
           const buf = await actx.decodeAudioData(await f.arrayBuffer());
           sampleLib.push({name: f.name.replace(/\.[^.]+$/, ''), buffer: trimBuffer(buf)});
           ok++;
+          setCount.textContent = 'decoding ' + ok + '/' + files.length + '…';
         } catch(err){ /* skip undecodable files */ }
       }
-      setCount.textContent = ok + ' sample(s) loaded (max 5s each, ADSR-capped at 2s on trigger)';
+      setCount.textContent = ok + ' sample(s) loaded' + (capped ? ', pool capped at ' + MAX_POOL : '') +
+        ' (max 5s each, ADSR-capped at 2s on trigger)';
       refreshSlotOptions();
     });
     function setSettings(v){
@@ -1804,7 +1836,11 @@ export default function ScopeOrgan() {
     }
     on(window, 'keydown', e=>{
       if (e.repeat) return;
-      if (!running){ if (e.code === 'Digit1') enter(); return; } // 1 skips the intro
+      if (!running){
+        if (e.code === 'Digit1') enter();
+        else if (e.code === 'Period') setSettings(!settingsOpen); // settings reachable before entering
+        return;
+      } // 1 skips the intro
       if (e.code === 'Digit1') setView(1);
       if (e.code === 'Digit2') setView(orbital ? 1 : 2);
       if (e.code === 'Digit3') setView(mode3 ? 1 : 3);
@@ -2008,6 +2044,7 @@ export default function ScopeOrgan() {
         g.gain.exponentialRampToValueAtTime(0.0001, t+4.5);
         o.connect(f); f.connect(g); g.connect(master);
         o.start(t); o.stop(t+4.6);
+        o.onended = reap(o, f, g);
       });
       const n = actx.createBufferSource(); n.buffer = noiseBuf;
       const bp = actx.createBiquadFilter(); bp.type = 'bandpass'; bp.Q.value = 1.4;
@@ -2019,6 +2056,7 @@ export default function ScopeOrgan() {
       ng.gain.exponentialRampToValueAtTime(0.0001, t+2.2);
       n.connect(bp); bp.connect(ng); ng.connect(master);
       n.start(t); n.stop(t+2.3);
+      n.onended = reap(n, bp, ng);
     }
     function strobeHit(i){
       if (!actx) return;
@@ -2036,6 +2074,7 @@ export default function ScopeOrgan() {
       ng.gain.setValueAtTime(0.12, t);
       ng.gain.exponentialRampToValueAtTime(0.0001, t+0.12);
       n.connect(bp); bp.connect(ng); ng.connect(master); n.start(t); n.stop(t+0.15);
+      o.onended = reap(o, g, n, bp, ng);
     }
     function strobeThump(){
       if (!actx) return;
@@ -2047,6 +2086,7 @@ export default function ScopeOrgan() {
       g.gain.setValueAtTime(0.5, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t+0.4);
       o.connect(g); g.connect(master); o.start(t); o.stop(t+0.45);
+      o.onended = reap(o, g);
     }
     function explode(point){
       const now = performance.now();
