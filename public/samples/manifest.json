@@ -1,0 +1,542 @@
+[
+ {
+  "slot": "kick",
+  "file": "kick/01.wav",
+  "name": "BS_POPL_drum_kick_mag_Gb"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/02.wav",
+  "name": "BS_EXHS_drums_kick_one_shot_pristine"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/03.wav",
+  "name": "BS_EXHS_drums_kick_one_shot_sandwich"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/04.wav",
+  "name": "BOS_IOT_Kick_One_Shot_Slip"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/05.wav",
+  "name": "BS_POPL_drum_kick_hydroid"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/06.wav",
+  "name": "BS_EXHS_drums_kick_one_shot_tree"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/07.wav",
+  "name": "BOS_IOT_Kick_One_Shot_Warp"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/08.wav",
+  "name": "AG_kick_tunti"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/09.wav",
+  "name": "SOPHIE_kick_dry_19"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/10.wav",
+  "name": "BOS_IOT_Kick_One_Shot_Jupiter"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/11.wav",
+  "name": "BR_kick_08"
+ },
+ {
+  "slot": "kick",
+  "file": "kick/12.wav",
+  "name": "AG_kick_syva"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/01.wav",
+  "name": "KOAN_SOUND_snare_grain_decay_02"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/02.wav",
+  "name": "KOAN_SOUND_snare_punch_crunch_01"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/03.wav",
+  "name": "ff_it_snare_nsx"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/04.wav",
+  "name": "BS_EXHS_drums_snare_one_shot_pimento"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/05.wav",
+  "name": "KOAN_SOUND_snare_hat_punch_09"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/06.wav",
+  "name": "BS_EXHS_drums_snare_one_shot_boring"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/07.wav",
+  "name": "KOAN_SOUND_snare_rim_crunch_04"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/08.wav",
+  "name": "BS_POPL_drum_snare_oberon"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/09.wav",
+  "name": "KOAN_SOUND_snare_punch_crunch_03"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/10.wav",
+  "name": "RU_IC_livecoding_snare_cave"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/11.wav",
+  "name": "BS_POPL_drum_snare_saryn"
+ },
+ {
+  "slot": "snare",
+  "file": "snare/12.wav",
+  "name": "BS_EXHS_drums_snare_one_shot_shards"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/01.wav",
+  "name": "MO_CUT_open_hat_proxima"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/02.wav",
+  "name": "MO_CUT_closed_hat_laminae"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/03.wav",
+  "name": "AG_hat_oitte"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/04.wav",
+  "name": "AG_hat_silloin"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/05.wav",
+  "name": "MO_CUT_hat_roll_stupefy"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/06.wav",
+  "name": "KOAN_SOUND_hihat_closed_03"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/07.wav",
+  "name": "BS_POPL_drum_hat_open_wisp"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/08.wav",
+  "name": "MO_CUT_hat_roll_talon"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/09.wav",
+  "name": "AG_hat_sanoit"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/10.wav",
+  "name": "KOAN_SOUND_hihat_open_flutter"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/11.wav",
+  "name": "AG_hat_pois"
+ },
+ {
+  "slot": "hat",
+  "file": "hat/12.wav",
+  "name": "BOS_IOT_Closed_Hihat_One_Shot_Years"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/01.wav",
+  "name": "AG_percussion_viisi"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/02.wav",
+  "name": "BS_EXHS_percussion_one_shot_abrupt"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/03.wav",
+  "name": "MO_CUT_perc_pinprick"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/04.wav",
+  "name": "BS_EXHS_percussion_one_shot_parmesan"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/05.wav",
+  "name": "KOAN_SOUND_percussion_tambourine"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/06.wav",
+  "name": "AG_percussion_sulje"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/07.wav",
+  "name": "KOAN_SOUND_percussion_cabasa_03"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/08.wav",
+  "name": "BS_EXHS_percussion_one_shot_wetlaser"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/09.wav",
+  "name": "BS_EXHS_percussion_one_shot_table"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/10.wav",
+  "name": "BOS_IOT_Percussion_One_Shot_ResonantDrum_C"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/11.wav",
+  "name": "BOS_IOT_808_Sub_Drop_One_Shot_Perched_F#"
+ },
+ {
+  "slot": "perc",
+  "file": "perc/12.wav",
+  "name": "KOAN_SOUND_percussion_shaker_02"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/01.wav",
+  "name": "BS_POPL_fx_glitch_cryotic"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/02.wav",
+  "name": "AG_glitch_tarjota"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/03.wav",
+  "name": "BS_POPL_fx_glitch_essence"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/04.wav",
+  "name": "BS_EXHS_fx_glitch_one_shot_faliure"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/05.wav",
+  "name": "BS_EXHS_fx_glitch_one_shot_cooltexture"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/06.wav",
+  "name": "BS_POPL_fx_glitch_alloy"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/07.wav",
+  "name": "AG_glitch_tuli"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/08.wav",
+  "name": "AG_glitch_tunnet"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/09.wav",
+  "name": "AG_glitch_saitko"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/10.wav",
+  "name": "AG_glitch_veto"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/11.wav",
+  "name": "BS_POPL_fx_glitch_stela"
+ },
+ {
+  "slot": "glitch",
+  "file": "glitch/12.wav",
+  "name": "BS_EXHS_fx_glitch_one_shot_breakthrough"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/01.wav",
+  "name": "BS_POPL_fx_downlifter_blind"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/02.wav",
+  "name": "RU_HY_fx_sword_pang_high"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/03.wav",
+  "name": "91V_CT_fx_gun_reload_short"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/04.wav",
+  "name": "BS_POPL_fx_woosh_scimitar"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/05.wav",
+  "name": "MO_CUT_fx_timbral_chaos"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/06.wav",
+  "name": "TL_TFX_SubDrop_OneShot_Subsonar"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/07.wav",
+  "name": "BS_POPL_fx_woosh_parallax"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/08.wav",
+  "name": "MO_XP3_fx_sweep_texture_rage_rising_to_the_surface_cut"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/09.wav",
+  "name": "ufx2_noisedirt_138"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/10.wav",
+  "name": "ZEN_STL_116_fx_one_shot_watery"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/11.wav",
+  "name": "BS_EXHS_fx_misc_one_shot_linger"
+ },
+ {
+  "slot": "fx",
+  "file": "fx/12.wav",
+  "name": "BS_EXHS_fx_misc_one_shot_dubious"
+ },
+ {
+  "slot": "drone",
+  "file": "drone/01.wav",
+  "name": "dce_synth_one_shot_drone_shining_Emin"
+ },
+ {
+  "slot": "drone",
+  "file": "drone/02.wav",
+  "name": "AG_130_drone_loop_bend"
+ },
+ {
+  "slot": "drone",
+  "file": "drone/03.wav",
+  "name": "AG_90_drone_loop_type_D#"
+ },
+ {
+  "slot": "drone",
+  "file": "drone/04.wav",
+  "name": "AG_130_drone_loop_implicate_G#"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/01.wav",
+  "name": "BS_EXHS_fx_misc_one_shot_laserflounder"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/02.wav",
+  "name": "RU_HY_fx_noise_laser_double"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/03.wav",
+  "name": "ESM_Fighting_Game_One_Shot_Designed_Weapons_Laser_Blast_Alien_SiFi_Shoot_Zap_Blaster_Alien_Cannon_04"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/04.wav",
+  "name": "RU_HY_fx_blaster_tap"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/05.wav",
+  "name": "ESM_Fighting_Game_One_Shot_Designed_Weapons_Laser_Blast_Alien_SiFi_Shoot_Zap_Blaster_Alien_Cannon_02"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/06.wav",
+  "name": "RU_HY_fx_noise_laser_fours"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/07.wav",
+  "name": "BS_EXHS_percussion_one_shot_wetlaser"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/08.wav",
+  "name": "BS_EXHS_fx_misc_one_shot_laserstumble"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/09.wav",
+  "name": "PE-Laser_BW.36501"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/10.wav",
+  "name": "BS_EXHS_fx_misc_one_shot_minigun"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/11.wav",
+  "name": "RKU_VS_PERCUSSION_ONE_SHOT_PHASE_JITTER_LASER"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/12.wav",
+  "name": "GunFoleyRifle_BW.55754"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/13.wav",
+  "name": "ESM_GW_designed_shotgun_hi_tech_shotgun_pulse_cannon_single_shot_fire_metal_energy_2"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/14.wav",
+  "name": "PHT_one_shot_fx_laser_13"
+ },
+ {
+  "slot": "shot",
+  "file": "shot/15.wav",
+  "name": "BS_EXHS_percussion_one_shot_doublezap"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/01.wav",
+  "name": "BS_POPL_fx_impact_ironclad"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/02.wav",
+  "name": "ESM_Builder_Game_Trinket_Cursed_2_Fantasy_Airy_Accent_Hit_Stab_Impact_Spell_Sparkle"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/03.wav",
+  "name": "BS_POPL_fx_impact_tectonic"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/04.wav",
+  "name": "ESM_Impacts_Massive_Impact_Epic_Hit_Slam_Movie_Trailer_Boom_Bang_"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/05.wav",
+  "name": "BS_POPL_fx_impact_stomp"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/06.wav",
+  "name": "BS_POPL_fx_impact_fission"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/07.wav",
+  "name": "BS_POPL_fx_impact_wrecking"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/08.wav",
+  "name": "BS_POPL_fx_impact_discharge"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/09.wav",
+  "name": "KSHMR_Impact_Low_07"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/10.wav",
+  "name": "ESM_MMO_Game_Magic_Designed_Lightning_Impact_16"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/11.wav",
+  "name": "dce_one_shot_impact_fuse_E"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/12.wav",
+  "name": "dce_one_shot_impact_discharge_F"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/13.wav",
+  "name": "BS_POPL_fx_impact_desiccation"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/14.wav",
+  "name": "BS_EXHS_fx_impact_one_shot_dissapear"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/15.wav",
+  "name": "BS_POPL_fx_impact_prey"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/16.wav",
+  "name": "dce_one_shot_impact_cold"
+ },
+ {
+  "slot": "impact",
+  "file": "impact/17.wav",
+  "name": "dce_one_shot_impact_shock"
+ }
+]
